@@ -15,7 +15,7 @@ export interface LoopOptions {
   seed: string;
   personas: Persona[];
   evals: Eval[];
-  icp: string;
+  baseline: string;
   runDir: string;
   maxIterations: number;
   controlMode: boolean;
@@ -27,7 +27,7 @@ const OSCILLATION_WINDOW = 4;
 const CONTENT_PREVIEW_LENGTH = 500;
 
 export async function runLoop(options: LoopOptions): Promise<void> {
-  const { seed, personas, evals, icp, runDir, maxIterations, controlMode } = options;
+  const { seed, personas, evals, baseline, runDir, maxIterations, controlMode } = options;
 
   await mkdir(join(runDir, "simulation"), { recursive: true });
   await mkdir(join(runDir, "raw"), { recursive: true });
@@ -74,7 +74,7 @@ Here is the current version:
 ${currentAsset}
 ---
 
-Target audience: ${icp || "General audience"}
+Context: ${baseline || "No baseline provided."}
 ${mutationTarget}${lessonsSection}
 
 Make ONE specific, focused change to improve this content. Do not rewrite from scratch.
@@ -97,7 +97,7 @@ Example format:
 
       // Simulate
       printStep("Running persona simulation...");
-      const simulation = await simulate(newAsset, personas, evals, icp);
+      const simulation = await simulate(newAsset, personas, evals, baseline);
 
       // Save raw simulation data
       await writeFile(

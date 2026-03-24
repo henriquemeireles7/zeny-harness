@@ -30,7 +30,12 @@ Question: Does the opening line contain a specific claim, story, or question (no
 Pass: First sentence makes a concrete, specific assertion or asks a genuine question
 Fail: Opens with "In today's world...", "Have you ever...", or other generic filler
 
-EVAL 5: No slop
+EVAL 5: Forward motion
+Question: After reading this, would the reader naturally want to learn more about the product or try it — without being explicitly told to?
+Pass: Content creates genuine curiosity or demonstrates enough value that the reader self-motivates to take the next step
+Fail: Content either has no connection to the product, or uses pushy CTAs like "Sign up now!" or "Don't miss out!"
+
+EVAL 6: No slop
 Question: Is the content free of these banned phrases: "game-changer", "here's the kicker", "the best part", "level up", "in today's fast-paced world", "buckle up", "let that sink in"?
 Pass: Zero banned phrases found
 Fail: Any banned phrase appears

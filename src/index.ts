@@ -4,11 +4,11 @@ import { join, resolve } from "node:path";
 import { loadPersonas } from "./memory.ts";
 import { parseEvalsFile } from "./simulate.ts";
 import { runLoop } from "./loop.ts";
+import { runClaude } from "./claude.ts";
 
 interface Args {
   seed?: string;
-  prompt?: string;
-  icp: string;
+  baseline: string;
   evals: string;
   control: boolean;
   maxIterations: number;
@@ -17,7 +17,7 @@ interface Args {
 
 function parseArgs(argv: string[]): Args {
   const args: Args = {
-    icp: join(process.cwd(), "icp.md"),
+    baseline: join(process.cwd(), "baseline.md"),
     evals: join(process.cwd(), "evals.md"),
     control: false,
     maxIterations: 10,
@@ -29,11 +29,8 @@ function parseArgs(argv: string[]): Args {
       case "--seed":
         args.seed = argv[++i];
         break;
-      case "--prompt":
-        args.prompt = argv[++i];
-        break;
-      case "--icp":
-        args.icp = resolve(argv[++i]);
+      case "--baseline":
+        args.baseline = resolve(argv[++i]);
         break;
       case "--evals":
         args.evals = resolve(argv[++i]);
@@ -66,9 +63,8 @@ function printUsage(): void {
 Usage: zeny [options]
 
 Options:
-  --seed <file>           Path to seed content file (start from existing asset)
-  --prompt <text>         Text prompt to generate initial content
-  --icp <file>            Path to ICP file (default: ./icp.md)
+  --seed <file>           Path to seed content file (skip auto-generation)
+  --baseline <file>       Path to baseline file (default: ./baseline.md)
   --evals <file>          Path to evals file (default: ./evals.md)
   --control               Run without learning (baseline comparison)
   --max-iterations <n>    Maximum cycles (default: 10)
@@ -76,42 +72,57 @@ Options:
   -h, --help              Show this help
 
 Examples:
-  zeny --seed tweet.md
-  zeny --seed tweet.md --icp my-audience.md --evals my-checks.md
-  zeny --seed tweet.md --control   # baseline run without learning
+  zeny                                    # auto-generates seed from baseline.md
+  zeny --seed my-tweet.md                 # start from existing content
+  zeny --max-iterations 5 --control       # baseline run, 5 cycles
 `);
+}
+
+async function generateSeed(baseline: string): Promise<string> {
+  console.log("  Generating seed from baseline...");
+  const prompt = `You are a content creator. Based on the following company baseline, write ONE short piece of content (a tweet or short post, under 280 characters) that would genuinely help the target audience.
+
+The content should:
+- Share a real insight or practical tip related to the company's problem space
+- Be valuable even if the reader never uses the product
+- Sound like a real person, not a brand
+- NOT be a product announcement or sales pitch
+
+Baseline:
+${baseline}
+
+Output ONLY the content, nothing else. No quotes, no explanation.`;
+
+  return runClaude(prompt);
 }
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv);
 
-  if (!args.seed && !args.prompt) {
-    console.error("Error: provide --seed <file> or --prompt <text>");
-    printUsage();
+  // Load baseline (required)
+  let baseline: string;
+  try {
+    baseline = await readFile(args.baseline, "utf-8");
+    console.log(`Baseline loaded from ${args.baseline}`);
+  } catch {
+    console.error(`Error: baseline.md not found at ${args.baseline}`);
+    console.error("Create baseline.md with your company context. See README for format.");
     process.exit(1);
   }
 
-  // Load or generate initial asset
+  // Load or generate seed
   let seed: string;
   if (args.seed) {
     try {
       seed = await readFile(args.seed, "utf-8");
+      console.log(`Seed loaded from ${args.seed}`);
     } catch {
       console.error(`Error: could not read seed file: ${args.seed}`);
       process.exit(1);
     }
   } else {
-    seed = args.prompt!;
-  }
-
-  // Load ICP
-  let icp = "";
-  try {
-    icp = await readFile(args.icp, "utf-8");
-    console.log(`ICP loaded from ${args.icp}`);
-  } catch {
-    console.warn("No ICP file found. Running without audience targeting.");
-    console.warn("Create icp.md or use --icp <file> for better results.\n");
+    seed = await generateSeed(baseline);
+    console.log(`Seed auto-generated: "${seed.slice(0, 80)}..."`);
   }
 
   // Load evals
@@ -121,12 +132,11 @@ async function main(): Promise<void> {
     evals = parseEvalsFile(evalsContent);
     if (evals.length === 0) throw new Error("No evals found");
     if (evals.length > 6) {
-      console.warn(`Warning: ${evals.length} evals loaded (max recommended: 6). More evals = noisier signal.`);
+      console.warn(`Warning: ${evals.length} evals loaded (max recommended: 6).`);
     }
-    console.log(`Loaded ${evals.length} evals from ${args.evals}`);
+    console.log(`Loaded ${evals.length} evals`);
   } catch (err) {
     console.error(`Error loading evals: ${err}`);
-    console.error("Create evals.md with binary yes/no checks. See docs for format.");
     process.exit(1);
   }
 
@@ -149,7 +159,7 @@ async function main(): Promise<void> {
     seed,
     personas,
     evals,
-    icp,
+    baseline,
     runDir,
     maxIterations: args.maxIterations,
     controlMode: args.control,
@@ -166,4 +176,4 @@ if (import.meta.main) {
   });
 }
 
-export { parseArgs };
+export { parseArgs, generateSeed };

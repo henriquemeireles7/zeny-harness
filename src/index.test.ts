@@ -5,14 +5,7 @@ describe("parseArgs", () => {
   test("parses --seed flag", () => {
     const args = parseArgs(["node", "zeny", "--seed", "tweet.md"]);
     expect(args.seed).toBe("tweet.md");
-    expect(args.prompt).toBeUndefined();
     expect(args.control).toBe(false);
-  });
-
-  test("parses --prompt flag", () => {
-    const args = parseArgs(["node", "zeny", "--prompt", "Write a tweet"]);
-    expect(args.prompt).toBe("Write a tweet");
-    expect(args.seed).toBeUndefined();
   });
 
   test("parses --control flag", () => {
@@ -30,38 +23,43 @@ describe("parseArgs", () => {
     expect(args.personasDir).toBe("/custom/personas");
   });
 
-  test("parses --icp flag", () => {
-    const args = parseArgs(["node", "zeny", "--seed", "tweet.md", "--icp", "/my/icp.md"]);
-    expect(args.icp).toBe("/my/icp.md");
+  test("parses --baseline flag", () => {
+    const args = parseArgs(["node", "zeny", "--baseline", "/my/baseline.md"]);
+    expect(args.baseline).toBe("/my/baseline.md");
   });
 
   test("parses --evals flag", () => {
-    const args = parseArgs(["node", "zeny", "--seed", "tweet.md", "--evals", "/my/evals.md"]);
+    const args = parseArgs(["node", "zeny", "--evals", "/my/evals.md"]);
     expect(args.evals).toBe("/my/evals.md");
   });
 
   test("defaults maxIterations to 10", () => {
-    const args = parseArgs(["node", "zeny", "--seed", "tweet.md"]);
+    const args = parseArgs(["node", "zeny"]);
     expect(args.maxIterations).toBe(10);
   });
 
   test("defaults control to false", () => {
-    const args = parseArgs(["node", "zeny", "--seed", "tweet.md"]);
+    const args = parseArgs(["node", "zeny"]);
     expect(args.control).toBe(false);
+  });
+
+  test("no --seed means seed is undefined (will auto-generate)", () => {
+    const args = parseArgs(["node", "zeny"]);
+    expect(args.seed).toBeUndefined();
   });
 
   test("parses all flags together", () => {
     const args = parseArgs([
       "node", "zeny",
       "--seed", "input.md",
-      "--icp", "/my/icp.md",
+      "--baseline", "/my/baseline.md",
       "--evals", "/my/evals.md",
       "--control",
       "--max-iterations", "3",
       "--personas-dir", "/my/personas",
     ]);
     expect(args.seed).toBe("input.md");
-    expect(args.icp).toBe("/my/icp.md");
+    expect(args.baseline).toBe("/my/baseline.md");
     expect(args.evals).toBe("/my/evals.md");
     expect(args.control).toBe(true);
     expect(args.maxIterations).toBe(3);

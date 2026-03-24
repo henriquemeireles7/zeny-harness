@@ -30,10 +30,10 @@ export async function simulate(
   asset: string,
   personas: Persona[],
   evals: Eval[],
-  icp: string,
+  baseline: string,
 ): Promise<SimulationResult> {
   // Step 1: Get individual reactions (parallel)
-  const reactionPromises = personas.map((p) => getReaction(p, asset, icp));
+  const reactionPromises = personas.map((p) => getReaction(p, asset, baseline));
   const reactionResults = await Promise.allSettled(reactionPromises);
 
   const reactions: PersonaReaction[] = [];
@@ -59,13 +59,15 @@ export async function simulate(
   return { reactions, crossReactions, score };
 }
 
-async function getReaction(persona: Persona, asset: string, icp: string): Promise<string> {
+async function getReaction(persona: Persona, asset: string, baseline: string): Promise<string> {
   const memorySection = persona.memory
     ? `\n\nYour memory from previous rounds:\n${persona.memory}`
     : "";
 
-  const icpSection = icp
-    ? `\n\nThis content is targeted at the following audience:\n${icp}\n\nYou are a member of this audience.`
+  // Extract just the ICP section from baseline for persona context
+  const icpMatch = baseline.match(/## ICP[^\n]*\n([\s\S]*?)(?=\n## |\n$)/);
+  const icpSection = icpMatch
+    ? `\n\nThis content is targeted at the following audience:\n${icpMatch[1].trim()}\n\nYou are a member of this audience.`
     : "";
 
   const prompt = `You are roleplaying as a specific persona. Stay in character completely.

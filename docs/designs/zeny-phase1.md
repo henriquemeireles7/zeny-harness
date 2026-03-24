@@ -55,3 +55,57 @@ The 10x version of Phase 1 isn't more code — it's a demo so compelling that th
 
 **UNRESOLVED:** 0
 **VERDICT:** CEO + ENG CLEARED — ready to implement.
+
+---
+
+## Dogfooding Learnings (v1.1 — 2026-03-24)
+
+Phase 1 was implemented and run. Seed: `"Write a tweet about X"`. 7 cycles completed, plateau detected at scores 80-85. The loop mechanically works. But dogfooding exposed 4 structural problems and 1 philosophical correction.
+
+### Finding 1: Dashboard must show the actual content
+
+**Problem:** The terminal shows persona quotes and scores but NOT the generated content itself. The user can't judge whether scores are meaningful without seeing what was scored.
+**Fix:** Print a truncated content preview (first ~500 chars) in each cycle's dashboard output.
+**Effort:** XS. Display change only.
+
+### Finding 2: Scoring must use binary evals, not scales
+
+**Problem:** The 0-5 scales for engagement/controversy/memorability/virality/hook-survival are exactly what the autoresearch eval guide calls "bad evals." They compound variability — the same content scored twice might get 3 or 4 on "memorability." This noise explains the plateau oscillation (80→81→80→82).
+**Evidence:** Autoresearch project (Karpathy methodology adapted for Claude skills) uses binary yes/no checks exclusively. Binary evals give reliable signal. Scales give noisy signal.
+**Fix:** Replace 5-point scales with 3-6 binary yes/no eval questions per run. User defines these as part of setup. Composite score = pass count / total checks.
+**Effort:** S. Changes simulate.ts scoring prompt and score parsing.
+
+### Finding 3: Value-first optimization, not engagement-first
+
+**Problem:** The scoring rubric optimizes for attention metrics (engagement, controversy, virality). In the test run, this produced corporate layoff content — high engagement, zero value, ethically questionable. The system found that controversial/emotional content scores well and gravitated toward it. This is the content-level alignment problem.
+**Fix:** Invert the optimization target. Primary objective = value ("does this genuinely help the reader?"). Engagement becomes a constraint, not the goal. Add two new dimensions:
+- **Value eval:** "Does this content teach, inform, or genuinely help the target reader?" (binary)
+- **Consciousness floor (Hawkins-inspired):** "Is this content free of fear-mongering, shame, blame, or manipulation?" (binary). Content that fails this = score 0 regardless of other evals. Hard floor, not a weight.
+**Philosophy:** We optimize for value subject to engagement > threshold. NOT engagement subject to value > threshold. The internet has enough rage-bait. Zeny produces content that makes someone's life better AND gets read.
+**Effort:** S. Changes scoring prompt, adds hard floor check.
+
+### Finding 4: Seed must be real content + ICP is required input
+
+**Problem:** Seed was `"Write a tweet about X"` — a prompt, not content. The generator interpreted this as content-to-improve and hallucinated a direction (layoff corporate messaging). Without a real seed and audience definition, the loop wanders into random territory.
+**Fix:**
+- Seed validation: if seed looks like a prompt rather than content, warn and offer to generate initial content first.
+- **ICP (Ideal Customer Profile) as required input:** New `--icp` flag or `icp.md` file. Defines WHO the content is for. Personas become behavior patterns applied TO the ICP, not generic archetypes.
+- Consider STEPPS framework (Jonah Berger, "Contagious"): Social Currency, Triggers, Emotion, Practical Value, Stories as empirically-grounded eval dimensions.
+**Effort:** S. New input validation + ICP injection into prompts.
+
+### Finding 5: One mutation per cycle, not wholesale rewrite
+
+**Problem:** Each cycle asks Claude to "create an improved version" — a full rewrite. We don't know what helped. Scores plateau because the system thrashes between equally-good rewrites.
+**Evidence:** Autoresearch methodology: change ONE thing, test, measure, keep/discard. Scientific method vs shotgun approach.
+**Fix:** Generator prompt should specify a single focused change per cycle, informed by the worst-performing eval from the previous round.
+**Effort:** S. Changes generator prompt in loop.ts.
+
+### Updated Scope for Phase 1.1
+
+| # | Change | Effort | Type |
+|---|--------|--------|------|
+| 1 | Content preview in dashboard | XS | Just code it |
+| 2 | Binary evals replace scales | S | Review first |
+| 3 | Value-first + consciousness floor | S | Review first |
+| 4 | ICP required input + seed validation | S | Review first |
+| 5 | Single mutation per cycle | S | Review first |

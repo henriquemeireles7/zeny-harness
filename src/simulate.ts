@@ -1,10 +1,16 @@
 import { runClaude } from "./claude.ts";
 import type { Persona } from "./memory.ts";
 
+export interface Eval {
+  name: string;
+  question: string;
+  isFloor: boolean; // if true, failing this = score 0
+}
+
 export interface SimulationResult {
   reactions: PersonaReaction[];
   crossReactions: PersonaReaction[];
-  score: CompositeScore;
+  score: EvalScore;
 }
 
 export interface PersonaReaction {
@@ -12,31 +18,22 @@ export interface PersonaReaction {
   reaction: string;
 }
 
-export interface CompositeScore {
-  composite: number;
-  subMetrics: {
-    engagementDepth: number;
-    controversy: number;
-    memorability: number;
-    viralityProxy: number;
-    hookSurvival: number;
-  };
+export interface EvalScore {
+  passed: number;
+  total: number;
+  percentage: number;
+  results: { eval: string; passed: boolean }[];
+  floorFailed: boolean;
 }
-
-const WEIGHTS = {
-  engagementDepth: 0.3,
-  controversy: 0.15,
-  memorability: 0.25,
-  viralityProxy: 0.2,
-  hookSurvival: 0.1,
-};
 
 export async function simulate(
   asset: string,
   personas: Persona[],
+  evals: Eval[],
+  icp: string,
 ): Promise<SimulationResult> {
   // Step 1: Get individual reactions (parallel)
-  const reactionPromises = personas.map((p) => getReaction(p, asset));
+  const reactionPromises = personas.map((p) => getReaction(p, asset, icp));
   const reactionResults = await Promise.allSettled(reactionPromises);
 
   const reactions: PersonaReaction[] = [];
@@ -56,25 +53,24 @@ export async function simulate(
   // Step 2: Cross-reactions (parallel)
   const crossReactions = await getCrossReactions(reactions, personas);
 
-  // Step 3: Extract score (separate prompt — guardrail: generator never sees this)
-  const allReactionText = [
-    ...reactions.map((r) => `[${r.persona}]: ${r.reaction}`),
-    ...crossReactions.map((r) => `[${r.persona} cross-reaction]: ${r.reaction}`),
-  ].join("\n\n");
-
-  const score = await extractScore(allReactionText);
+  // Step 3: Score with binary evals (separate prompt — guardrail: generator never sees this)
+  const score = await runEvals(asset, reactions, crossReactions, evals);
 
   return { reactions, crossReactions, score };
 }
 
-async function getReaction(persona: Persona, asset: string): Promise<string> {
+async function getReaction(persona: Persona, asset: string, icp: string): Promise<string> {
   const memorySection = persona.memory
     ? `\n\nYour memory from previous rounds:\n${persona.memory}`
     : "";
 
+  const icpSection = icp
+    ? `\n\nThis content is targeted at the following audience:\n${icp}\n\nYou are a member of this audience.`
+    : "";
+
   const prompt = `You are roleplaying as a specific persona. Stay in character completely.
 
-${persona.definition}${memorySection}
+${persona.definition}${icpSection}${memorySection}
 
 You are scrolling through your feed and you see this content:
 
@@ -123,81 +119,95 @@ Read all the reactions. Pick the one reaction from another person that you find 
     .filter((r): r is PersonaReaction => r !== null);
 }
 
-async function extractScore(allReactionText: string): Promise<CompositeScore> {
+async function runEvals(
+  asset: string,
+  reactions: PersonaReaction[],
+  crossReactions: PersonaReaction[],
+  evals: Eval[],
+): Promise<EvalScore> {
+  const reactionsText = [
+    ...reactions.map((r) => `[${r.persona}]: ${r.reaction}`),
+    ...crossReactions.map((r) => `[${r.persona} cross-reaction]: ${r.reaction}`),
+  ].join("\n\n");
+
+  const evalQuestions = evals
+    .map((e, i) => `EVAL ${i + 1}: ${e.name}\nQuestion: ${e.question}`)
+    .join("\n\n");
+
   // GUARDRAIL: This prompt is NEVER shown to the generator.
-  // The generator sees persona reactions but NOT these scoring criteria.
-  const prompt = `You are a behavioral analyst extracting metrics from audience simulation data.
+  const prompt = `You are an impartial content evaluator. Answer each question with ONLY "yes" or "no" based on the evidence.
 
-Analyze these audience reactions and cross-reactions to a piece of content:
+Here is the content being evaluated:
 
-${allReactionText}
+---
+${asset}
+---
 
-Extract these 5 metrics. For each, output a number from 0 to 5 (0 = none of the personas, 5 = all personas).
+Here are audience reactions to this content:
 
-## Engagement Depth
-How many personas wrote a substantive response (more than a dismissal)? Count personas who clearly read and thought about the content.
+${reactionsText}
 
-## Controversy
-How many cross-reaction disagreements are there? Count instances where one persona pushes back on another's take.
+Answer each eval question. Output ONLY "yes" or "no" for each, one per line, in order.
 
-## Memorability
-How many personas indicated they would save, bookmark, or come back to this content? Look for language suggesting future reference, not just current interest.
+${evalQuestions}
 
-## Virality Proxy
-How many personas indicated they would share, repost, or send this to someone else? Look for sharing intent.
-
-## Hook Survival
-How many personas read past the first line? Count personas who engaged with specific details from the body of the content, not just the opening.
-
-Output ONLY in this exact format (numbers only, 0-5 each):
-engagement_depth: <number>
-controversy: <number>
-memorability: <number>
-virality_proxy: <number>
-hook_survival: <number>`;
+Output format (one answer per line, nothing else):
+${evals.map((_, i) => `eval_${i + 1}: yes/no`).join("\n")}`;
 
   try {
     const response = await runClaude(prompt);
-    return parseScoreResponse(response);
+    return parseEvalResponse(response, evals);
   } catch {
     return {
-      composite: 0,
-      subMetrics: {
-        engagementDepth: 0,
-        controversy: 0,
-        memorability: 0,
-        viralityProxy: 0,
-        hookSurvival: 0,
-      },
+      passed: 0,
+      total: evals.length,
+      percentage: 0,
+      results: evals.map((e) => ({ eval: e.name, passed: false })),
+      floorFailed: false,
     };
   }
 }
 
-function parseScoreResponse(response: string): CompositeScore {
-  const extract = (key: string): number => {
-    const match = response.match(new RegExp(`${key}:\\s*(\\d+)`));
-    const val = match ? parseInt(match[1], 10) : 0;
-    return Math.min(5, Math.max(0, val)); // clamp 0-5
-  };
+export function parseEvalResponse(response: string, evals: Eval[]): EvalScore {
+  const results: { eval: string; passed: boolean }[] = [];
+  let floorFailed = false;
 
-  const subMetrics = {
-    engagementDepth: extract("engagement_depth"),
-    controversy: extract("controversy"),
-    memorability: extract("memorability"),
-    viralityProxy: extract("virality_proxy"),
-    hookSurvival: extract("hook_survival"),
-  };
+  for (let i = 0; i < evals.length; i++) {
+    const pattern = new RegExp(`eval_${i + 1}:\\s*(yes|no)`, "i");
+    const match = response.match(pattern);
+    const passed = match ? match[1].toLowerCase() === "yes" : false;
 
-  const composite = Math.round(
-    (subMetrics.engagementDepth * WEIGHTS.engagementDepth +
-      subMetrics.controversy * WEIGHTS.controversy +
-      subMetrics.memorability * WEIGHTS.memorability +
-      subMetrics.viralityProxy * WEIGHTS.viralityProxy +
-      subMetrics.hookSurvival * WEIGHTS.hookSurvival) *
-      20,
-  );
+    if (!passed && evals[i].isFloor) {
+      floorFailed = true;
+    }
 
-  return { composite, subMetrics };
+    results.push({ eval: evals[i].name, passed });
+  }
+
+  const passedCount = floorFailed ? 0 : results.filter((r) => r.passed).length;
+  const total = evals.length;
+  const percentage = total > 0 ? Math.round((passedCount / total) * 100) : 0;
+
+  return { passed: passedCount, total, percentage, results, floorFailed };
 }
 
-export { parseScoreResponse };
+export function parseEvalsFile(content: string): Eval[] {
+  const evals: Eval[] = [];
+  const blocks = content.split(/^EVAL \d+:/m).slice(1);
+
+  for (const block of blocks) {
+    const nameMatch = block.match(/^(.+)/);
+    const questionMatch = block.match(/Question:\s*(.+)/);
+    const isFloor = /Hard floor|hard floor|NOTE:.*floor/i.test(block);
+
+    if (nameMatch && questionMatch) {
+      evals.push({
+        name: nameMatch[1].trim(),
+        question: questionMatch[1].trim(),
+        isFloor,
+      });
+    }
+  }
+
+  return evals;
+}

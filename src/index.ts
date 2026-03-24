@@ -2,11 +2,14 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { loadPersonas } from "./memory.ts";
+import { parseEvalsFile } from "./simulate.ts";
 import { runLoop } from "./loop.ts";
 
 interface Args {
   seed?: string;
   prompt?: string;
+  icp: string;
+  evals: string;
   control: boolean;
   maxIterations: number;
   personasDir: string;
@@ -14,6 +17,8 @@ interface Args {
 
 function parseArgs(argv: string[]): Args {
   const args: Args = {
+    icp: join(process.cwd(), "icp.md"),
+    evals: join(process.cwd(), "evals.md"),
     control: false,
     maxIterations: 10,
     personasDir: join(process.cwd(), "personas"),
@@ -26,6 +31,12 @@ function parseArgs(argv: string[]): Args {
         break;
       case "--prompt":
         args.prompt = argv[++i];
+        break;
+      case "--icp":
+        args.icp = resolve(argv[++i]);
+        break;
+      case "--evals":
+        args.evals = resolve(argv[++i]);
         break;
       case "--control":
         args.control = true;
@@ -57,6 +68,8 @@ Usage: zeny [options]
 Options:
   --seed <file>           Path to seed content file (start from existing asset)
   --prompt <text>         Text prompt to generate initial content
+  --icp <file>            Path to ICP file (default: ./icp.md)
+  --evals <file>          Path to evals file (default: ./evals.md)
   --control               Run without learning (baseline comparison)
   --max-iterations <n>    Maximum cycles (default: 10)
   --personas-dir <dir>    Path to personas directory (default: ./personas)
@@ -64,7 +77,7 @@ Options:
 
 Examples:
   zeny --seed tweet.md
-  zeny --prompt "Write a tweet about AI agents that learn"
+  zeny --seed tweet.md --icp my-audience.md --evals my-checks.md
   zeny --seed tweet.md --control   # baseline run without learning
 `);
 }
@@ -91,6 +104,32 @@ async function main(): Promise<void> {
     seed = args.prompt!;
   }
 
+  // Load ICP
+  let icp = "";
+  try {
+    icp = await readFile(args.icp, "utf-8");
+    console.log(`ICP loaded from ${args.icp}`);
+  } catch {
+    console.warn("No ICP file found. Running without audience targeting.");
+    console.warn("Create icp.md or use --icp <file> for better results.\n");
+  }
+
+  // Load evals
+  let evals;
+  try {
+    const evalsContent = await readFile(args.evals, "utf-8");
+    evals = parseEvalsFile(evalsContent);
+    if (evals.length === 0) throw new Error("No evals found");
+    if (evals.length > 6) {
+      console.warn(`Warning: ${evals.length} evals loaded (max recommended: 6). More evals = noisier signal.`);
+    }
+    console.log(`Loaded ${evals.length} evals from ${args.evals}`);
+  } catch (err) {
+    console.error(`Error loading evals: ${err}`);
+    console.error("Create evals.md with binary yes/no checks. See docs for format.");
+    process.exit(1);
+  }
+
   // Load personas
   let personas;
   try {
@@ -109,6 +148,8 @@ async function main(): Promise<void> {
   await runLoop({
     seed,
     personas,
+    evals,
+    icp,
     runDir,
     maxIterations: args.maxIterations,
     controlMode: args.control,

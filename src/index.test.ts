@@ -30,6 +30,16 @@ describe("parseArgs", () => {
     expect(args.personasDir).toBe("/custom/personas");
   });
 
+  test("parses --icp flag", () => {
+    const args = parseArgs(["node", "zeny", "--seed", "tweet.md", "--icp", "/my/icp.md"]);
+    expect(args.icp).toBe("/my/icp.md");
+  });
+
+  test("parses --evals flag", () => {
+    const args = parseArgs(["node", "zeny", "--seed", "tweet.md", "--evals", "/my/evals.md"]);
+    expect(args.evals).toBe("/my/evals.md");
+  });
+
   test("defaults maxIterations to 10", () => {
     const args = parseArgs(["node", "zeny", "--seed", "tweet.md"]);
     expect(args.maxIterations).toBe(10);
@@ -44,11 +54,15 @@ describe("parseArgs", () => {
     const args = parseArgs([
       "node", "zeny",
       "--seed", "input.md",
+      "--icp", "/my/icp.md",
+      "--evals", "/my/evals.md",
       "--control",
       "--max-iterations", "3",
       "--personas-dir", "/my/personas",
     ]);
     expect(args.seed).toBe("input.md");
+    expect(args.icp).toBe("/my/icp.md");
+    expect(args.evals).toBe("/my/evals.md");
     expect(args.control).toBe(true);
     expect(args.maxIterations).toBe(3);
     expect(args.personasDir).toBe("/my/personas");

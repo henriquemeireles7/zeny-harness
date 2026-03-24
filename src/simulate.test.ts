@@ -1,103 +1,151 @@
 import { describe, test, expect } from "bun:test";
-import { parseScoreResponse } from "./simulate.ts";
+import { parseEvalResponse, parseEvalsFile } from "./simulate.ts";
+import type { Eval } from "./simulate.ts";
 
-describe("parseScoreResponse", () => {
-  test("extracts all 5 sub-metrics from well-formatted response", () => {
-    const response = `engagement_depth: 4
-controversy: 2
-memorability: 3
-virality_proxy: 5
-hook_survival: 4`;
+const testEvals: Eval[] = [
+  { name: "Consciousness floor", question: "Is this free of fear-mongering?", isFloor: true },
+  { name: "Genuine value", question: "Does this help the reader?", isFloor: false },
+  { name: "Hook", question: "Does the opening have a specific claim?", isFloor: false },
+];
 
-    const score = parseScoreResponse(response);
-    expect(score.subMetrics.engagementDepth).toBe(4);
-    expect(score.subMetrics.controversy).toBe(2);
-    expect(score.subMetrics.memorability).toBe(3);
-    expect(score.subMetrics.viralityProxy).toBe(5);
-    expect(score.subMetrics.hookSurvival).toBe(4);
+describe("parseEvalResponse", () => {
+  test("parses all yes responses", () => {
+    const response = `eval_1: yes
+eval_2: yes
+eval_3: yes`;
+
+    const score = parseEvalResponse(response, testEvals);
+    expect(score.passed).toBe(3);
+    expect(score.total).toBe(3);
+    expect(score.percentage).toBe(100);
+    expect(score.floorFailed).toBe(false);
   });
 
-  test("computes composite score correctly", () => {
-    // All 5s: (5*0.3 + 5*0.15 + 5*0.25 + 5*0.2 + 5*0.1) * 20 = 5 * 1.0 * 20 = 100
-    const response = `engagement_depth: 5
-controversy: 5
-memorability: 5
-virality_proxy: 5
-hook_survival: 5`;
+  test("parses mixed responses", () => {
+    const response = `eval_1: yes
+eval_2: no
+eval_3: yes`;
 
-    const score = parseScoreResponse(response);
-    expect(score.composite).toBe(100);
+    const score = parseEvalResponse(response, testEvals);
+    expect(score.passed).toBe(2);
+    expect(score.total).toBe(3);
+    expect(score.percentage).toBe(67);
+    expect(score.floorFailed).toBe(false);
   });
 
-  test("computes composite for mixed scores", () => {
-    // (3*0.3 + 1*0.15 + 2*0.25 + 4*0.2 + 5*0.1) * 20
-    // = (0.9 + 0.15 + 0.5 + 0.8 + 0.5) * 20 = 2.85 * 20 = 57
-    const response = `engagement_depth: 3
-controversy: 1
-memorability: 2
-virality_proxy: 4
-hook_survival: 5`;
+  test("forces score to 0 when floor eval fails", () => {
+    const response = `eval_1: no
+eval_2: yes
+eval_3: yes`;
 
-    const score = parseScoreResponse(response);
-    expect(score.composite).toBe(57);
+    const score = parseEvalResponse(response, testEvals);
+    expect(score.passed).toBe(0);
+    expect(score.percentage).toBe(0);
+    expect(score.floorFailed).toBe(true);
   });
 
-  test("clamps values above 5 to 5", () => {
-    const response = `engagement_depth: 9
-controversy: 0
-memorability: 0
-virality_proxy: 0
-hook_survival: 0`;
+  test("handles case-insensitive responses", () => {
+    const response = `eval_1: YES
+eval_2: No
+eval_3: Yes`;
 
-    const score = parseScoreResponse(response);
-    expect(score.subMetrics.engagementDepth).toBe(5);
+    const score = parseEvalResponse(response, testEvals);
+    expect(score.passed).toBe(2);
+    expect(score.results[0].passed).toBe(true);
+    expect(score.results[1].passed).toBe(false);
+    expect(score.results[2].passed).toBe(true);
   });
 
-  test("defaults to 0 for missing metrics", () => {
-    const response = "engagement_depth: 3";
-
-    const score = parseScoreResponse(response);
-    expect(score.subMetrics.engagementDepth).toBe(3);
-    expect(score.subMetrics.controversy).toBe(0);
-    expect(score.subMetrics.memorability).toBe(0);
-    expect(score.subMetrics.viralityProxy).toBe(0);
-    expect(score.subMetrics.hookSurvival).toBe(0);
+  test("defaults to false for unparseable responses", () => {
+    const score = parseEvalResponse("I don't understand", testEvals);
+    expect(score.passed).toBe(0);
+    expect(score.percentage).toBe(0);
   });
 
-  test("handles noisy/chatty LLM output with extra text", () => {
-    const response = `Here are my ratings:
+  test("handles noisy LLM output with extra text", () => {
+    const response = `Here are my evaluations:
 
-Based on the reactions, I would score:
-engagement_depth: 4
-controversy: 2
-memorability: 3
-virality_proxy: 1
-hook_survival: 5
+Based on the content:
+eval_1: yes
+eval_2: yes
+eval_3: no
 
-These scores reflect the overall engagement patterns.`;
+These are my honest assessments.`;
 
-    const score = parseScoreResponse(response);
-    expect(score.subMetrics.engagementDepth).toBe(4);
-    expect(score.subMetrics.controversy).toBe(2);
-    expect(score.subMetrics.memorability).toBe(3);
-    expect(score.subMetrics.viralityProxy).toBe(1);
-    expect(score.subMetrics.hookSurvival).toBe(5);
+    const score = parseEvalResponse(response, testEvals);
+    expect(score.passed).toBe(2);
+    expect(score.results[0].passed).toBe(true);
+    expect(score.results[1].passed).toBe(true);
+    expect(score.results[2].passed).toBe(false);
   });
 
-  test("returns all zeros for completely unparseable response", () => {
-    const score = parseScoreResponse("I don't understand the question.");
-    expect(score.composite).toBe(0);
-    expect(score.subMetrics.engagementDepth).toBe(0);
+  test("all no responses gives 0%", () => {
+    const nonFloorEvals: Eval[] = [
+      { name: "A", question: "q", isFloor: false },
+      { name: "B", question: "q", isFloor: false },
+    ];
+    const response = `eval_1: no
+eval_2: no`;
+
+    const score = parseEvalResponse(response, nonFloorEvals);
+    expect(score.passed).toBe(0);
+    expect(score.percentage).toBe(0);
+    expect(score.floorFailed).toBe(false);
+  });
+});
+
+describe("parseEvalsFile", () => {
+  test("parses eval file format", () => {
+    const content = `# Evals
+
+EVAL 1: Consciousness floor
+Question: Is this content free of fear-mongering?
+Pass: Content is positive
+Fail: Content uses fear
+NOTE: Hard floor — if this fails, score is 0
+
+EVAL 2: Value check
+Question: Does this help the reader?
+Pass: Reader learns something
+Fail: Content is empty`;
+
+    const evals = parseEvalsFile(content);
+    expect(evals).toHaveLength(2);
+    expect(evals[0].name).toBe("Consciousness floor");
+    expect(evals[0].question).toBe("Is this content free of fear-mongering?");
+    expect(evals[0].isFloor).toBe(true);
+    expect(evals[1].name).toBe("Value check");
+    expect(evals[1].isFloor).toBe(false);
   });
 
-  test("composite is 0 when all sub-metrics are 0", () => {
-    const response = `engagement_depth: 0
-controversy: 0
-memorability: 0
-virality_proxy: 0
-hook_survival: 0`;
+  test("returns empty array for no evals", () => {
+    const evals = parseEvalsFile("# Just a header\nNo evals here");
+    expect(evals).toHaveLength(0);
+  });
 
-    const score = parseScoreResponse(response);
-    expect(score.composite).toBe(0);
+  test("handles evals without floor annotation", () => {
+    const content = `EVAL 1: Simple check
+Question: Is the text under 200 words?
+Pass: Under 200
+Fail: Over 200`;
+
+    const evals = parseEvalsFile(content);
+    expect(evals).toHaveLength(1);
+    expect(evals[0].isFloor).toBe(false);
+  });
+
+  test("parses multiple evals in sequence", () => {
+    const content = `EVAL 1: A
+Question: Is A true?
+
+EVAL 2: B
+Question: Is B true?
+
+EVAL 3: C
+Question: Is C true?`;
+
+    const evals = parseEvalsFile(content);
+    expect(evals).toHaveLength(3);
+    expect(evals.map((e) => e.name)).toEqual(["A", "B", "C"]);
   });
 });

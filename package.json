@@ -1,0 +1,17 @@
+{
+  "name": "zeny",
+  "version": "0.1.0",
+  "description": "Self-learning autonomous experiment engine for business operations",
+  "type": "module",
+  "bin": {
+    "zeny": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "test": "bun test"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

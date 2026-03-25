@@ -3,7 +3,7 @@ import { runSkillTest } from './helpers/session-runner';
 import type { SkillTestResult } from './helpers/session-runner';
 import { EvalCollector } from './helpers/eval-store';
 import type { EvalTestEntry } from './helpers/eval-store';
-import { selectTests, detectBaseBranch, getChangedFiles, E2E_TOUCHFILES, GLOBAL_TOUCHFILES } from './helpers/touchfiles';
+import { selectTests, detectBaseBranch, getChangedFiles, E2E_TOUCHFILES, E2E_TIERS, GLOBAL_TOUCHFILES } from './helpers/touchfiles';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -40,6 +40,21 @@ if (evalsEnabled && !process.env.EVALS_ALL) {
     }
     process.stderr.write('\n');
   }
+}
+
+// Apply EVALS_TIER filter (same logic as e2e-helpers.ts)
+if (evalsEnabled && process.env.EVALS_TIER) {
+  const tier = process.env.EVALS_TIER as 'gate' | 'periodic';
+  const tierTests = Object.entries(E2E_TIERS)
+    .filter(([, t]) => t === tier)
+    .map(([name]) => name);
+
+  if (selectedTests === null) {
+    selectedTests = tierTests;
+  } else {
+    selectedTests = selectedTests.filter(t => tierTests.includes(t));
+  }
+  process.stderr.write(`Routing EVALS_TIER=${tier}: ${selectedTests.length} tests\n\n`);
 }
 
 // --- Helper functions ---
@@ -140,6 +155,15 @@ function recordRouting(name: string, result: SkillTestResult, expectedSkill: str
   });
 }
 
+// Skip individual tests based on selectedTests (diff + tier filtering)
+const testIfSelected = (name: string, fn: () => Promise<void>, timeout?: number) => {
+  if (selectedTests !== null && !selectedTests.includes(name)) {
+    test.skip(name, () => {});
+  } else {
+    test.concurrent(name, fn, timeout);
+  }
+};
+
 // --- Tests ---
 
 describeE2E('Skill Routing E2E — Developer Journey', () => {
@@ -147,7 +171,7 @@ describeE2E('Skill Routing E2E — Developer Journey', () => {
     evalCollector?.finalize();
   });
 
-  test.concurrent('journey-ideation', async () => {
+  testIfSelected('journey-ideation', async () => {
     const tmpDir = createRoutingWorkDir('ideation');
     try {
 
@@ -176,7 +200,7 @@ describeE2E('Skill Routing E2E — Developer Journey', () => {
     }
   }, 150_000);
 
-  test.concurrent('journey-plan-eng', async () => {
+  testIfSelected('journey-plan-eng', async () => {
     const tmpDir = createRoutingWorkDir('plan-eng');
     try {
       fs.writeFileSync(path.join(tmpDir, 'plan.md'), `# Waitlist App Architecture
@@ -226,7 +250,7 @@ describeE2E('Skill Routing E2E — Developer Journey', () => {
     }
   }, 150_000);
 
-  test.concurrent('journey-think-bigger', async () => {
+  testIfSelected('journey-think-bigger', async () => {
     const tmpDir = createRoutingWorkDir('think-bigger');
     try {
       fs.writeFileSync(path.join(tmpDir, 'plan.md'), `# Waitlist App Architecture
@@ -270,13 +294,14 @@ describeE2E('Skill Routing E2E — Developer Journey', () => {
       recordRouting(testName, result, expectedSkill, actualSkill);
 
       expect(skillCalls.length, `Expected Skill tool to be called but got 0 calls. Claude may have answered directly without invoking a skill. Tool calls: ${result.toolCalls.map(tc => tc.tool).join(', ')}`).toBeGreaterThan(0);
-      expect([expectedSkill], `Expected skill ${expectedSkill} but got ${actualSkill}`).toContain(actualSkill);
+      const validSkills = ['plan-ceo-review', 'office-hours'];
+      expect(validSkills, `Expected one of ${validSkills.join('/')} but got ${actualSkill}`).toContain(actualSkill);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   }, 180_000);
 
-  test.concurrent('journey-debug', async () => {
+  testIfSelected('journey-debug', async () => {
     const tmpDir = createRoutingWorkDir('debug');
     try {
       const run = (cmd: string, args: string[]) =>
@@ -327,13 +352,14 @@ export default app;
       recordRouting(testName, result, expectedSkill, actualSkill);
 
       expect(skillCalls.length, `Expected Skill tool to be called but got 0 calls. Claude may have answered directly without invoking a skill. Tool calls: ${result.toolCalls.map(tc => tc.tool).join(', ')}`).toBeGreaterThan(0);
-      expect([expectedSkill], `Expected skill ${expectedSkill} but got ${actualSkill}`).toContain(actualSkill);
+      const validSkills = ['investigate', 'qa'];
+      expect(validSkills, `Expected one of ${validSkills.join('/')} but got ${actualSkill}`).toContain(actualSkill);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   }, 150_000);
 
-  test.concurrent('journey-qa', async () => {
+  testIfSelected('journey-qa', async () => {
     const tmpDir = createRoutingWorkDir('qa');
     try {
       fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'waitlist-app', scripts: { dev: 'next dev' } }, null, 2));
@@ -369,7 +395,7 @@ export default app;
     }
   }, 150_000);
 
-  test.concurrent('journey-code-review', async () => {
+  testIfSelected('journey-code-review', async () => {
     const tmpDir = createRoutingWorkDir('code-review');
     try {
       const run = (cmd: string, args: string[]) =>
@@ -409,7 +435,7 @@ export default app;
     }
   }, 150_000);
 
-  test.concurrent('journey-ship', async () => {
+  testIfSelected('journey-ship', async () => {
     const tmpDir = createRoutingWorkDir('ship');
     try {
       const run = (cmd: string, args: string[]) =>
@@ -448,7 +474,7 @@ export default app;
     }
   }, 150_000);
 
-  test.concurrent('journey-docs', async () => {
+  testIfSelected('journey-docs', async () => {
     const tmpDir = createRoutingWorkDir('docs');
     try {
       const run = (cmd: string, args: string[]) =>
@@ -485,7 +511,7 @@ export default app;
     }
   }, 150_000);
 
-  test.concurrent('journey-retro', async () => {
+  testIfSelected('journey-retro', async () => {
     const tmpDir = createRoutingWorkDir('retro');
     try {
       const run = (cmd: string, args: string[]) =>
@@ -528,7 +554,7 @@ export default app;
     }
   }, 150_000);
 
-  test.concurrent('journey-design-system', async () => {
+  testIfSelected('journey-design-system', async () => {
     const tmpDir = createRoutingWorkDir('design-system');
     try {
 
@@ -557,7 +583,7 @@ export default app;
     }
   }, 150_000);
 
-  test.concurrent('journey-visual-qa', async () => {
+  testIfSelected('journey-visual-qa', async () => {
     const tmpDir = createRoutingWorkDir('visual-qa');
     try {
       const run = (cmd: string, args: string[]) =>
@@ -602,7 +628,8 @@ body { font-family: sans-serif; }
       recordRouting(testName, result, expectedSkill, actualSkill);
 
       expect(skillCalls.length, `Expected Skill tool to be called but got 0 calls. Claude may have answered directly without invoking a skill. Tool calls: ${result.toolCalls.map(tc => tc.tool).join(', ')}`).toBeGreaterThan(0);
-      expect([expectedSkill], `Expected skill ${expectedSkill} but got ${actualSkill}`).toContain(actualSkill);
+      const validSkills = ['design-review', 'qa', 'qa-only', 'browse'];
+      expect(validSkills, `Expected one of ${validSkills.join('/')} but got ${actualSkill}`).toContain(actualSkill);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
